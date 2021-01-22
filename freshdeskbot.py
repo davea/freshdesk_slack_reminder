@@ -47,12 +47,14 @@ slack_message = {
     "username": "Freshdesk summary",
     "icon_emoji": ":freshdesk:",
     "attachments": [],
+    "text": "",
 }
 
 tickets = call_freshdesk_api("tickets", filter="new_and_my_open")
 awaiting_reply = 0
+new_tickets = 0
 for agent, tickets in groupby(
-    sorted(tickets, key=lambda t: t['responder_id'] or 0, reverse=True),
+    sorted(tickets, key=lambda t: t["responder_id"] or 0, reverse=True),
     itemgetter("responder_id"),
 ):
     for i, ticket in enumerate(
@@ -76,9 +78,13 @@ for agent, tickets in groupby(
             "tickets/{}/conversations".format(ticket["id"])
         )
         msgs = [m for m in conversations if not m["private"]]
-        customer_replied = msgs[-1]["incoming"] if msgs else True # if no conversations assume it's a new incoming ticket
-        if customer_replied:
+        customer_replied = (
+            msgs[-1]["incoming"] if msgs else True
+        )  # if no conversations assume it's a new incoming ticket
+        if customer_replied and agent:
             awaiting_reply += 1
+        if customer_replied and not agent:
+            new_tickets += 1
         last_reply = format_reply_time(msgs[-1]["created_at"]) if msgs else None
         company = ticket["company"]["name"]
         reply_desc = (
@@ -94,14 +100,13 @@ for agent, tickets in groupby(
         slack_message["attachments"].append(
             {
                 "fallback": fallback,
-                "text": "<https://{url}.freshdesk.com/a/tickets/{id}|#{id}> {company}".format(
-                    url=FRESHDESK_URL, id=ticket["id"], company=company
+                "text": "<https://{url}.freshdesk.com/a/tickets/{id}|#{id}> *{company}*: {subject}".format(
+                    url=FRESHDESK_URL, id=ticket["id"], company=company, subject=ticket['subject']
                 ),
                 "pretext": pretext,
                 "color": "#d00000" if customer_replied else "#00d000",
                 "fields": [
                     {
-                        "title": ticket["subject"],
                         "value": reply_desc,
                     },
                 ],
@@ -110,6 +115,12 @@ for agent, tickets in groupby(
 
 # Generate a nicer summary for e.g. notifications
 if awaiting_reply:
-    slack_message['text'] = "{} ticket{} awaiting reply".format(humanize.apnumber(awaiting_reply).title(), "s" if awaiting_reply > 1 else "")
+    slack_message["text"] += "{} ticket{} awaiting reply. ".format(
+        humanize.apnumber(awaiting_reply).title(), "s" if awaiting_reply > 1 else ""
+    )
+if new_tickets:
+    slack_message["text"] += "{} new ticket{}.".format(
+        humanize.apnumber(new_tickets).title(), "s" if new_tickets > 1 else ""
+    )
 
 call_slack_webhook(slack_message)
