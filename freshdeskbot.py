@@ -86,7 +86,7 @@ for agent, tickets in groupby(
         if customer_replied and not agent:
             new_tickets += 1
         last_reply = format_reply_time(msgs[-1]["created_at"]) if msgs else None
-        company = ticket["company"]["name"]
+        company = ticket["company"].get("name", "Unknown")
         reply_desc = (
             "{} replied {}".format(
                 "Customer" if customer_replied else "Agent", last_reply
