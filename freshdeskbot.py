@@ -7,10 +7,11 @@ import humanize
 from operator import itemgetter
 from itertools import groupby
 from datetime import datetime
+from collections import defaultdict
 
 FRESHDESK_KEY = os.environ["FRESHDESK_KEY"]
 FRESHDESK_URL = os.environ["FRESHDESK_URL"]
-FRESHDESK_AGENT_ID = os.environ["FRESHDESK_AGENT_ID"]
+FRESHDESK_AGENT_MAPPING = os.environ["FRESHDESK_AGENT_MAPPING"]
 SLACK_URL = os.environ["SLACK_URL"]
 SLACK_CHANNEL = os.environ["SLACK_CHANNEL"]
 
@@ -42,16 +43,27 @@ def format_reply_time(time):
     )
 
 
-slack_message = {
-    "channel": SLACK_CHANNEL,
-    "username": "Freshdesk summary",
-    "icon_emoji": ":freshdesk:",
-    "attachments": [],
-    "text": "",
+agent_slack_mapping = {
+    int(agent): channel
+    for agent, channel in (i.split(":") for i in FRESHDESK_AGENT_MAPPING.split(","))
 }
 
-tickets = call_freshdesk_api("tickets", filter="new_and_my_open")
-awaiting_reply = 0
+
+def slack_message_template(agent):
+    return {
+        "channel": agent_slack_mapping[agent],
+        "username": "Freshdesk summary",
+        "icon_emoji": ":freshdesk:",
+        "attachments": [],
+        "text": "",
+    }
+
+
+tickets = call_freshdesk_api(
+    "search/tickets", query='"status:2 OR status:3 OR status:8"'
+)["results"]
+messages_by_agent = defaultdict(list)
+awaiting_reply = defaultdict(int)
 new_tickets = 0
 for agent, tickets in groupby(
     sorted(tickets, key=lambda t: t["responder_id"] or 0, reverse=True),
@@ -60,6 +72,8 @@ for agent, tickets in groupby(
     for i, ticket in enumerate(
         sorted(tickets, key=itemgetter("updated_at"), reverse=True)
     ):
+        if agent not in agent_slack_mapping:
+            continue
         pretext = ""
         if i == 0:
             if agent:
@@ -82,7 +96,7 @@ for agent, tickets in groupby(
             msgs[-1]["incoming"] if msgs else True
         )  # if no conversations assume it's a new incoming ticket
         if customer_replied and agent:
-            awaiting_reply += 1
+            awaiting_reply[agent] += 1
         if customer_replied and not agent:
             new_tickets += 1
         last_reply = format_reply_time(msgs[-1]["created_at"]) if msgs else None
@@ -97,11 +111,14 @@ for agent, tickets in groupby(
         fallback = "#{id} - {company_name} - {subject} {reply_desc}".format(
             reply_desc=reply_desc, company_name=company, **ticket
         )
-        slack_message["attachments"].append(
+        messages_by_agent[agent].append(
             {
                 "fallback": fallback,
                 "text": "<https://{url}.freshdesk.com/a/tickets/{id}|#{id}> *{company}*: {subject}".format(
-                    url=FRESHDESK_URL, id=ticket["id"], company=company, subject=ticket['subject']
+                    url=FRESHDESK_URL,
+                    id=ticket["id"],
+                    company=company,
+                    subject=ticket["subject"],
                 ),
                 "pretext": pretext,
                 "color": "#d00000" if customer_replied else "#00d000",
@@ -113,14 +130,19 @@ for agent, tickets in groupby(
             }
         )
 
-# Generate a nicer summary for e.g. notifications
-if awaiting_reply:
-    slack_message["text"] += "{} ticket{} awaiting reply. ".format(
-        humanize.apnumber(awaiting_reply).title(), "s" if awaiting_reply > 1 else ""
-    )
-if new_tickets:
-    slack_message["text"] += "{} new ticket{}.".format(
-        humanize.apnumber(new_tickets).title(), "s" if new_tickets > 1 else ""
-    )
-
-call_slack_webhook(slack_message)
+for agent in [k for k in messages_by_agent.keys() if k]:
+    # Generate a nicer summary for e.g. notifications
+    slack_message = slack_message_template(agent)
+    if awaiting_reply[agent]:
+        slack_message["text"] += "{} ticket{} awaiting reply.".format(
+            humanize.apnumber(awaiting_reply[agent]).title(),
+            "s" if awaiting_reply[agent] > 1 else "",
+        )
+    if new_tickets:
+        slack_message["text"] += " {} new ticket{}.".format(
+            humanize.apnumber(new_tickets).title(), "s" if new_tickets > 1 else ""
+        )
+    slack_message["attachments"] = messages_by_agent[agent]
+    if messages_by_agent[0]:  # unassigned tickets
+        slack_message["attachments"].extend(messages_by_agent[0])
+    call_slack_webhook(slack_message)
