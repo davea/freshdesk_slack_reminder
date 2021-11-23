@@ -1,5 +1,5 @@
 upload:
-	rsync --exclude venv -Ppa . ${UPLOAD_DESTINATION}
+	rsync --exclude venv --exclude .envrc -Ppa . ${UPLOAD_DESTINATION}
 
 venv:
 	python3 -m venv venv
