@@ -92,7 +92,7 @@ for agent, tickets in groupby(
     for i, ticket in enumerate(
         sorted(tickets, key=itemgetter("updated_at"), reverse=True)
     ):
-        if agent not in agent_slack_mapping:
+        if agent and agent not in agent_slack_mapping:
             continue
         pretext = ""
         if i == 0:
@@ -163,6 +163,6 @@ for agent in [k for k in messages_by_agent.keys() if k]:
             humanize.apnumber(new_tickets).title(), "s" if new_tickets > 1 else ""
         )
     slack_message["attachments"] = messages_by_agent[agent]
-    if messages_by_agent[0]:  # unassigned tickets
-        slack_message["attachments"].extend(messages_by_agent[0])
+    if messages_by_agent[None]:  # unassigned tickets
+        slack_message["attachments"].extend(messages_by_agent[None])
     call_slack_webhook(slack_message)
