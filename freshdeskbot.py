@@ -60,23 +60,11 @@ def slack_message_template(agent):
 
 
 def status_query():
-    # get the list from the API like this:
-    # curl -v -u $FRESHDESK_KEY:X -X GET "https://$FRESHDESK_URL.freshdesk.com/api/v2/ticket_fields?type=default_status" |jq -r '.[0].choices | keys[] as $k | "\($k), # \(.[$k][0])"'|sort -n
-    statuses = [
-        2,  # Open
-        3,  # Pending
-        8,  # Awaiting scheduling
-        9,  # Being investigated
-        10,  # To be quoted
-        11,  # Quote issued
-        12,  # Scheduled
-        13,  # In progress
-        14,  # Awaiting sign off
-        15,  # Ready to invoice
-        # Don't want to worry about closed tickets
-        # 4, # Resolved
-        # 5, # Closed
+    all_statuses = call_freshdesk_api("ticket_fields", type="default_status")[0][
+        "choices"
     ]
+    ignored_statuses = {"Resolved", "Closed"}
+    statuses = [k for k, v in all_statuses.items() if v[0] not in ignored_statuses]
 
     return '"{}"'.format(" OR ".join("status:{}".format(str(i)) for i in statuses))
 
