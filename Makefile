@@ -7,3 +7,6 @@ venv:
 
 clean:
 	rm -rf venv
+
+run:
+	./run.sh
