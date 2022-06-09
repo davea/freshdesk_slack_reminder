@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 import requests
 import humanize
 from operator import itemgetter
@@ -32,6 +33,19 @@ def call_freshdesk_api(url, add_root=True, **kwargs):
 
     return results
 
+def tickets_search(query):
+    # Because of course the search results API uses a different pagination
+    # mechanism.
+    page = 1
+    response = call_freshdesk_api("search/tickets", query=query)
+    results_count = response['total']
+    tickets = response['results']
+    while len(tickets) < results_count:
+        page += 1
+        response = call_freshdesk_api("search/tickets", query=query, page=page)
+        tickets.extend(response['results'])
+    return tickets
+
 
 def call_slack_webhook(payload):
     requests.post(SLACK_URL, data={"payload": json.dumps(payload)})
@@ -50,12 +64,16 @@ agent_slack_mapping = {
 
 
 def slack_message_template(agent):
+    assigned = len(messages_by_agent[agent])
     return {
         "channel": agent_slack_mapping[agent],
         "username": "Freshdesk summary",
         "icon_emoji": ":freshdesk:",
         "attachments": [],
-        "text": "",
+        "text": " {} unresolved ticket{}.".format(
+            humanize.apnumber(assigned).title(),
+            "s" if assigned > 1 else "",
+        ),
     }
 
 
@@ -69,7 +87,7 @@ def status_query():
     return '"{}"'.format(" OR ".join("status:{}".format(str(i)) for i in statuses))
 
 
-tickets = call_freshdesk_api("search/tickets", query=status_query())["results"]
+tickets = tickets_search(status_query())
 messages_by_agent = defaultdict(list)
 awaiting_reply = defaultdict(int)
 new_tickets = 0
@@ -142,7 +160,7 @@ for agent in [k for k in messages_by_agent.keys() if k]:
     # Generate a nicer summary for e.g. notifications
     slack_message = slack_message_template(agent)
     if awaiting_reply[agent]:
-        slack_message["text"] += "{} ticket{} awaiting reply.".format(
+        slack_message["text"] += " {} ticket{} awaiting reply.".format(
             humanize.apnumber(awaiting_reply[agent]).title(),
             "s" if awaiting_reply[agent] > 1 else "",
         )
